@@ -373,3 +373,372 @@ def cast_int_if_int_else_float(x):
         return float(x)
     else:
         return x
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from acnn1d import ACNN
+import sklearn
+from sklearn.model_selection import train_test_split
+# Define custom dataset
+class MultiModalDataset(Dataset):
+    def __init__(self, eeg_data, meta_data, labels):
+        self.eeg_data = eeg_data
+        self.meta_data = meta_data
+        self.labels = labels
+    
+    def __len__(self):
+        return len(self.labels)
+    
+    def __getitem__(self, index):
+        return self.eeg_data[index], self.meta_data[index], self.labels[index]
+
+
+# Define custom dataset
+class TestDataset(Dataset):
+    def __init__(self, eeg_data, meta_data):
+        self.eeg_data = eeg_data
+        self.meta_data = meta_data
+    
+    def __len__(self):
+        return len(self.meta_data)
+    
+    def __getitem__(self, index):
+        return self.eeg_data[index], self.meta_data[index]
+
+
+# Your pre-trained EEG Model, but without the last layer
+class Modified1DCNN(nn.Module):
+    def __init__(self, original_model):
+        super(Modified1DCNN, self).__init__()
+        # Remove the last layer (Assuming sequential model)
+        self.features = nn.Sequential(*list(original_model.children())[:-1])
+        print(list(original_model.children()))
+    def forward(self, x):
+        x = self.features(x)
+        return x
+
+# Multi-modal Model
+class MultiModalModel(nn.Module):
+    def __init__(self, eeg_model, meta_input_dim):
+        super(MultiModalModel, self).__init__()
+        self.eeg_model = eeg_model
+        self.meta_model = nn.Sequential(
+            nn.Linear(meta_input_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU()
+        )
+        #self.classifier = nn.Linear(64 + eeg_model.output_dim, 1)
+        self.classifier = nn.Linear(64 + 64, 1)
+    
+    def forward(self, eeg_data, meta_data):
+        x1 = self.eeg_model(eeg_data)
+        x2 = self.meta_model(meta_data)
+        #print(x1.shape, x2.shape)
+
+        x = torch.cat((x1, x2), dim=1)
+        x = self.classifier(x)
+        return x
+
+def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, cpc=False):
+
+    # Split dataset into training and testing data
+    #ntest = max(1, int(len(ptlist) * 0.1))
+    #pt_train, psd_train, y_train = pt_list[ntest:], psd_list[ntest:], label[ntest:]
+    #pt_test, psd_test, y_test = pt_list[:ntest], psd_list[:ntest], label[:ntest]
+
+    if cpc:
+        stratify = None
+    else:
+        stratify = label
+    pt_train, pt_val, psd_train, psd_val, y_train, y_val = train_test_split(pt_list, psd_list, label, test_size = 0.15, random_state=42, stratify=stratify)
+
+    pt_train = torch.tensor(pt_train, dtype=torch.float32)
+    psd_train = torch.tensor(psd_train, dtype=torch.float32)
+    y_train = torch.tensor(y_train, dtype=torch.long)
+
+    pt_val = torch.tensor(pt_val, dtype=torch.float32)
+    psd_val = torch.tensor(psd_val, dtype=torch.float32)
+    y_val = torch.tensor(y_val, dtype=torch.long)
+
+    train_dataset = MultiModalDataset(psd_train, pt_train, y_train)
+    val_dataset = MultiModalDataset(psd_val, pt_val, y_val)
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False)
+    
+
+    # Initialize CRNN model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f'Device : {device}')
+
+    n_classes = 1 #len(np.unique(label)) # Number of classes for classification
+    in_channels = 2 #psd_list.shape[1]  # Number of EEG channels
+    out_channels = 64  # Number of output channels after the CNN
+    att_channels=16
+    n_len_seg = 128 # Segment length for RNN, adjust based on your needs
+
+
+    # Criterion and optimizer
+    criterion = nn.BCEWithLogitsLoss()
+    #scoring = True
+
+    if cpc:
+        criterion = nn.MSELoss()
+        #scoring = False
+
+    base_model = ACNN(in_channels, out_channels, att_channels, n_len_seg, n_classes, device, last_layer=False)
+    if pretrained:
+        base_model.load_state_dict(torch.load("./pretrain_model.pth"))
+
+    ## Create the modified model
+    #modified_eeg_model = Modified1DCNN(original_eeg_model)
+    base_model.last_layer = False
+
+    meta_input_dim = pt_list.shape[1]
+    model = MultiModalModel(base_model, meta_input_dim)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    model = model.to(device)
+    # Early stopping parameters
+    patience = 10  # Number of epochs with no improvement to wait
+    best_val_loss = float('inf')
+    best_score = float('-inf')
+    counter = 0
+
+    # Training loop
+    n_epochs = 200
+    for epoch in range(1, n_epochs + 1):
+        # Training phase
+        model.train()
+        train_loss = 0.0
+        for batch_idx, (psd_data, pt_data, target) in enumerate(train_loader):
+            psd_data, pt_data, target = psd_data.to(device), pt_data.to(device), target.to(device).float() #.unsqueeze(1)
+            optimizer.zero_grad()
+            output = model(psd_data, pt_data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+        
+        train_loss /= len(train_loader)
+        print(f"Epoch: {epoch}, Training Loss: {train_loss:.6f}")
+        
+        # Validation phase
+        model.eval()
+        val_loss = 0.0
+        all_labels = []
+        all_predictions = []
+        with torch.no_grad():
+            for psd_data, pt_data, target in val_loader:
+                psd_data, pt_data, target = psd_data.to(device), pt_data.to(device), target.to(device).float() #.unsqueeze(1)
+                output = model(psd_data, pt_data)
+                loss = criterion(output, target)
+                val_loss += loss.item()
+                all_labels.append(target.cpu().numpy())
+
+                if not cpc:
+                    output = torch.sigmoid(output)
+                all_predictions.append(torch.sigmoid(output).cpu().numpy())
+        
+        val_loss /= len(val_loader)
+        all_labels = np.vstack(all_labels)
+        all_predictions = np.vstack(all_predictions)
+        #auroc = roc_auc_score(all_labels, all_predictions)
+        if not cpc:
+            val_score = compute_score(all_labels, all_predictions)
+            print(all_predictions)
+            print(f"Validation Loss: {val_loss:.6f}, SCORE: {val_score:.6f}")
+
+            # Check for early stopping
+            if val_score > best_score:
+                best_score = val_score
+                counter = 0
+                torch.save(model.state_dict(), os.path.join(model_folder, 'best_model_outcome.pth'))
+                print("Saved best model")
+            else:
+                counter += 1
+                if counter >= patience:
+                    print("Early stopping triggered")
+                    break
+
+        else:
+            print(f"Validation Loss: {val_loss:.6f}")
+            
+            # Check for early stopping
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                counter = 0
+                torch.save(model.state_dict(), os.path.join(model_folder, 'best_model_cpc.pth'))
+                print("Saved best model")
+            else:
+                counter += 1
+                if counter >= patience:
+                    print("Early stopping triggered")
+                    break
+
+def test_model(pt_list, psd_list, modelpath=None, cpc=False):
+    
+    # Split dataset into training and testing data
+    #ntest = max(1, int(len(ptlist) * 0.1))
+    #pt_train, psd_train, y_train = pt_list[ntest:], psd_list[ntest:], label[ntest:]
+    #pt_test, psd_test, y_test = pt_list[:ntest], psd_list[:ntest], label[:ntest]
+    #print(psd_list.shape)
+
+    pt_list = torch.tensor(pt_list, dtype=torch.float32)
+    psd_list = torch.tensor(psd_list, dtype=torch.float32).unsqueeze(0)
+
+    test_dataset = TestDataset(psd_list, pt_list)
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True)
+
+    # Initialize CRNN model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    #print(f'Device : {device}')
+
+    #n_classes = len(np.unique(label)) # Number of classes for classification
+    n_classes = 1 ## Never mind
+    in_channels = 2 #psd_list.shape[1]  # Number of EEG channels
+    out_channels = 64  # Number of output channels after the CNN
+    att_channels=16
+    n_len_seg = 128 # Segment length for RNN, adjust based on your needs
+
+
+    base_model = ACNN(in_channels, out_channels, att_channels, n_len_seg, n_classes, device, last_layer=False)
+    base_model.last_layer = False
+    meta_input_dim = pt_list.shape[1]
+    model = MultiModalModel(base_model, meta_input_dim)
+    model.load_state_dict(torch.load(modelpath))
+    model.eval()  # Switch to evaluation mode
+    model = model.to(device)  # Move model to GPU if available
+
+    # Initialize a list to store your predictions
+    predictions = []
+    # Evaluation loop
+    with torch.no_grad():
+        for batch_idx, (psd_data, pt_data) in enumerate(test_loader):
+            #data = data[0].to(device)  # If there's only one element in your dataset, index into the tuple
+            #print(psd_data.shape)
+            #print(psd_data.unsqueeze(1).shape)
+            psd_data, pt_data = psd_data.to(device), pt_data.to(device)
+            output = model(psd_data, pt_data)
+            if not cpc:
+                output = torch.sigmoid(output)  # If your output is a logit and you want a probability
+            output = output.cpu().numpy()  # Move output back to CPU and convert to NumPy array
+            predictions.extend(output)
+
+    # Convert predictions to a NumPy array
+    predictions = np.array(predictions)
+
+    return predictions
+## Define parameters for random forest classifier and regressor.
+    #n_estimators   = 123  # Number of trees in the forest.
+    #max_leaf_nodes = 456  # Maximum number of leaf nodes in each tree.
+    #random_state   = 789  # Random state; set for reproducibility.
+
+    #outcome_model = RandomForestClassifier(
+    #    n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, outcomes.ravel())
+    #cpc_model = RandomForestRegressor(
+    #    n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, cpcs.ravel())
+
+ # Compute the Challenge score.
+def compute_score(labels, outputs):
+    # Check the data.
+    assert len(labels) == len(outputs)
+
+    # Convert the data to NumPy arrays for easier indexing.
+    current_labels = np.asarray(labels, dtype=np.float64)
+    current_outputs = np.asarray(outputs, dtype=np.float64)
+
+    # # Identify the unique hospitals.
+    # unique_hospitals = sorted(set(hospitals))
+    # num_hospitals = len(unique_hospitals)
+
+    # # Initialize a confusion matrix for each hospital.
+    # tps = np.zeros(num_hospitals)
+    # fps = np.zeros(num_hospitals)
+    # fns = np.zeros(num_hospitals)
+    # tns = np.zeros(num_hospitals)
+    tps = 0
+    fps = 0
+    fns = 0
+    tns = 0
+
+    # Compute the confusion matrix at each output threshold separately for each hospital.
+    #for i, hospital in enumerate(unique_hospitals):
+    #    idx = [j for j, x in enumerate(hospitals) if x == hospital]
+    #    current_labels = labels[idx]
+    #    current_outputs = outputs[idx]
+    num_instances = len(current_labels)
+
+    # Collect the unique output values as the thresholds for the positive and negative classes.
+    thresholds = np.unique(current_outputs)
+    thresholds = np.append(thresholds, thresholds[-1]+1)
+    thresholds = thresholds[::-1]
+    num_thresholds = len(thresholds)
+
+    idx = np.argsort(current_outputs)[::-1]
+
+    # Initialize the TPs, FPs, FNs, and TNs with no positive outputs.
+    tp = np.zeros(num_thresholds)
+    fp = np.zeros(num_thresholds)
+    fn = np.zeros(num_thresholds)
+    tn = np.zeros(num_thresholds)
+
+    tp[0] = 0
+    fp[0] = 0
+    fn[0] = np.sum(current_labels == 1)
+    tn[0] = np.sum(current_labels == 0)
+
+    # Update the TPs, FPs, FNs, and TNs using the values at the previous threshold.
+    k = 0
+    for l in range(1, num_thresholds):
+        tp[l] = tp[l-1]
+        fp[l] = fp[l-1]
+        fn[l] = fn[l-1]
+        tn[l] = tn[l-1]
+
+        while k < num_instances and current_outputs[idx[k]] >= thresholds[l]:
+            if current_labels[idx[k]] == 1:
+                tp[l] += 1
+                fn[l] -= 1
+            else:
+                fp[l] += 1
+                tn[l] -= 1
+            k += 1
+
+    # Compute the FPRs.
+    fpr = np.zeros(num_thresholds)
+    for l in range(num_thresholds):
+        if tp[l] + fn[l] > 0:
+            fpr[l] = float(fp[l]) / float(tp[l] + fn[l])
+        else:
+            fpr[l] = float('nan')
+
+    # Find the threshold such that FPR <= 0.05.
+    max_fpr = 0.05
+    if np.any(fpr <= max_fpr):
+        l = max(l for l, x in enumerate(fpr) if x <= max_fpr)
+        tps = tp[l]
+        fps = fp[l]
+        fns = fn[l]
+        tns = tn[l]
+    else:
+        tps = tp[0]
+        fps = fp[0]
+        fns = fn[0]
+        tns = tn[0]
+
+    # Compute the TPR at FPR <= 0.05 for each hospital.
+    tp = tps
+    fp = fps
+    fn = fns
+    tn = tns
+
+    print(f'tp / fp / fn / tn : {tp, fp, fn, tn}')
+    if tp + fn > 0:
+        max_tpr = tp / (tp + fn)
+    else:
+        max_tpr = float('nan')
+
+    return max_tpr
