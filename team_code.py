@@ -30,7 +30,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if verbose >= 1:
         print('Finding the Challenge data...')
 
-    patient_ids = find_data_folders(data_folder)[:40] #************
+    patient_ids = find_data_folders(data_folder) #************
     #patient_ids2 = find_data_folders(data_folder)[70:100]
     #patient_ids = np.concatenate([patient_ids, patient_ids2])
     num_patients = len(patient_ids)
