@@ -573,7 +573,7 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
         #auroc = roc_auc_score(all_labels, all_predictions)
         if not cpc:
             val_score = compute_score(all_labels, all_predictions)
-            print(all_predictions)
+            #print(all_predictions)
             print(f"Validation Loss: {val_loss:.6f}, SCORE: {val_score:.6f}")
 
             # Check for early stopping
