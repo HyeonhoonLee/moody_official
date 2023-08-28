@@ -672,8 +672,8 @@ def compute_score(labels, outputs):
     assert len(labels) == len(outputs)
 
     # Convert the data to NumPy arrays for easier indexing.
-    current_labels = np.asarray(labels, dtype=np.float64)
-    current_outputs = np.asarray(outputs, dtype=np.float64)
+    current_labels = np.asarray(labels.flatten(), dtype=np.float64)
+    current_outputs = np.asarray(outputs.flatten(), dtype=np.float64)
 
     # # Identify the unique hospitals.
     # unique_hospitals = sorted(set(hospitals))
