@@ -263,11 +263,11 @@ def get_features(data_folder, patient_id):
                 #data = np.array([data[0, :] - data[1, :], data[2, :] - data[3, :]]) # Convert to bipolar montage: F3-P3 and F4-P4
                 eeg_features = get_eeg_features(data, sampling_frequency) #.flatten()
             else:
-                eeg_features = float('nan') * np.ones(1280) # 2 bipolar channels * 4 features / channel
+                eeg_features = float('nan') * np.ones((2, 1280)) # 2 bipolar channels * 4 features / channel
         else:
-            eeg_features = float('nan') * np.ones(1280) # 2 bipolar channels * 4 features / channel
+            eeg_features = float('nan') * np.ones((2, 1280)) # 2 bipolar channels * 4 features / channel
     else:
-        eeg_features = float('nan') * np.ones(1280) # 2 bipolar channels * 4 features / channel
+        eeg_features = float('nan') * np.ones((2, 1280)) # 2 bipolar channels * 4 features / channel
 
     '''
     # Extract ECG features.
