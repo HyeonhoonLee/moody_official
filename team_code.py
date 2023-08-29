@@ -529,8 +529,8 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
 
     train_dataset = MultiModalDataset(psd_train, pt_train, y_train)
     val_dataset = MultiModalDataset(psd_val, pt_val, y_val)
-    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
     
 
     # Initialize CRNN model
