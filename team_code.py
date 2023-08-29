@@ -108,7 +108,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     train_model(pt_list, psd_list, outcomes, model_folder, pretrained=True, cpc=False)
 
     #2 CPC model
-    #train_model(pt_list, psd_list, cpcs, model_folder, pretrained=True, cpc=True)
+    train_model(pt_list, psd_list, cpcs, model_folder, pretrained=True, cpc=True)
 
     
     # Assume eeg_data.shape = (n_samples, n_channels, n_timepoints)
