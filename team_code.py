@@ -372,6 +372,27 @@ def get_eeg_features(data, sampling_frequency):
     
     psds = [p for p in psds if p.shape == (2,1921)]
 
+        if len(psds) < 10:
+        for j in range(len(data)//4, len(data)//4 + SEGLEN-NFFT, SLIDE):
+            if len(data[EEG1, j:j+NFFT]) < NFFT/2:
+                continue
+            if len(data[EEG2, j:j+NFFT]) < NFFT/2:
+                continue
+
+            nall = len(consecutive(data[EEG1, j:j+NFFT], stepsize=0, threshold=sampling_frequency*10))
+            nall2 = len(consecutive(data[EEG2, j:j+NFFT], stepsize=0, threshold=sampling_frequency*10))
+            if nall > 1 or nall2 > 1:
+                continue
+            
+            
+            psd, freq = psd_array_multitaper(data[EEG1, j:j+NFFT], sampling_frequency, adaptive=True, normalization='full', verbose=50)
+            psd2, freq2 = psd_array_multitaper(data[EEG2, j:j+NFFT], sampling_frequency, adaptive=True, normalization='full', verbose=50)  
+            psd = np.vstack([psd, psd2])
+            psds.append(psd)
+        print('Additional psd analysis')
+
+    psds = [p for p in psds if p.shape == (2,1921)]
+
     if len(psds) < 10:
         for j in range(len(data)//2, len(data)//2 + SEGLEN-NFFT, SLIDE):
             if len(data[EEG1, j:j+NFFT]) < NFFT/2:
@@ -389,7 +410,28 @@ def get_eeg_features(data, sampling_frequency):
             psd2, freq2 = psd_array_multitaper(data[EEG2, j:j+NFFT], sampling_frequency, adaptive=True, normalization='full', verbose=50)  
             psd = np.vstack([psd, psd2])
             psds.append(psd)
-        print('Additional psd analysis')
+        print('Additional psd analysis2')
+
+    psds = [p for p in psds if p.shape == (2,1921)]
+
+    if len(psds) < 10:
+        for j in range(3*len(data)//4, 3*len(data)//4 + SEGLEN-NFFT, SLIDE):
+            if len(data[EEG1, j:j+NFFT]) < NFFT/2:
+                continue
+            if len(data[EEG2, j:j+NFFT]) < NFFT/2:
+                continue
+
+            nall = len(consecutive(data[EEG1, j:j+NFFT], stepsize=0, threshold=sampling_frequency*10))
+            nall2 = len(consecutive(data[EEG2, j:j+NFFT], stepsize=0, threshold=sampling_frequency*10))
+            if nall > 1 or nall2 > 1:
+                continue
+            
+            
+            psd, freq = psd_array_multitaper(data[EEG1, j:j+NFFT], sampling_frequency, adaptive=True, normalization='full', verbose=50)
+            psd2, freq2 = psd_array_multitaper(data[EEG2, j:j+NFFT], sampling_frequency, adaptive=True, normalization='full', verbose=50)  
+            psd = np.vstack([psd, psd2])
+            psds.append(psd)
+        print('Additional psd analysis3')
 
     psds = [p for p in psds if p.shape == (2,1921)]
 
