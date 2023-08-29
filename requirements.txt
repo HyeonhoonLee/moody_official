@@ -4,3 +4,4 @@ scikit-learn==1.2.2
 joblib==1.2.0
 mne==1.4.0
 torch==1.14.0
+libauc==1.3.0

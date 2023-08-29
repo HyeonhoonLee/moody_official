@@ -30,7 +30,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if verbose >= 1:
         print('Finding the Challenge data...')
 
-    patient_ids = find_data_folders(data_folder) #[100:110] #************
+    patient_ids = find_data_folders(data_folder)[100:150] #************
     #patient_ids2 = find_data_folders(data_folder)[70:100]
     #patient_ids = np.concatenate([patient_ids, patient_ids2])
     num_patients = len(patient_ids)
@@ -252,6 +252,13 @@ def get_features(data_folder, patient_id):
 
     if num_recordings > 0:
         recording_id = recording_ids[-1] ##recording_ids = ['0284_001_004', '0284_002_005', ... '0284_085_074']
+#################################################################### ONLY HERE ##############################################################
+        for reid in recording_ids:
+            if reid.endswith('_072'):
+                recording_id = reid
+                print(f'get a 72 hr file in pid : {patient_id}')
+                break
+#################################################################### ONLY HERE ##############################################################
         recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
         if os.path.exists(recording_location + '.hea'):
             data, channels, sampling_frequency = load_recording_data(recording_location)
@@ -450,7 +457,7 @@ class MultiModalDataset(Dataset):
         return len(self.labels)
     
     def __getitem__(self, index):
-        return self.eeg_data[index], self.meta_data[index], self.labels[index]
+        return self.eeg_data[index], self.meta_data[index], self.labels[index], index
 
 
 # Define custom dataset
@@ -513,6 +520,12 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
         stratify = label
     pt_train, pt_val, psd_train, psd_val, y_train, y_val = train_test_split(pt_list, psd_list, label, test_size = 0.15, random_state=42, stratify=stratify)
 
+    train_data_len = len(y_train)
+    train_pos_len = int(np.sum(y_train == 1))
+
+    val_data_len = len(y_val)
+    val_pos_len = int(np.sum(y_val == 1))
+
     pt_train = torch.tensor(pt_train, dtype=torch.float32)
     psd_train = torch.tensor(psd_train, dtype=torch.float32)
     y_train = torch.tensor(y_train, dtype=torch.long)
@@ -537,9 +550,16 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
     att_channels=16
     n_len_seg = 128 # Segment length for RNN, adjust based on your needs
 
+    import libauc
+    from libauc.losses import pAUC_CVaR_Loss
+
+    criterion1 = pAUC_CVaR_Loss(data_len=train_data_len, pos_len=train_pos_len, beta=0.05, eta=0.1)
+    criterion2 = pAUC_CVaR_Loss(data_len=val_data_len, pos_len=val_pos_len, beta=0.05, eta=0.1)
+    #classpAUC_CVaR_Loss(data_len, pos_len, num_neg=None, margin=1.0, beta=0.2, eta=1.0, surr_loss='squared_hinge', device=None)
 
     # Criterion and optimizer
-    criterion = nn.BCEWithLogitsLoss()
+    #criterion = nn.BCEWithLogitsLoss()
+    
     #scoring = True
 
     if cpc:
@@ -572,11 +592,14 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
         # Training phase
         model.train()
         train_loss = 0.0
-        for batch_idx, (psd_data, pt_data, target) in enumerate(train_loader):
-            psd_data, pt_data, target = psd_data.to(device), pt_data.to(device), target.to(device).float() #.unsqueeze(1)
+        for batch_idx, (psd_data, pt_data, target, index) in enumerate(train_loader):
+            psd_data, pt_data, target, index = psd_data.to(device), pt_data.to(device), target.to(device).float(), index.to(device) #.unsqueeze(1)
             optimizer.zero_grad()
             output = model(psd_data, pt_data)
-            loss = criterion(output, target)
+            if cpc:
+                loss = criterion(output, target)
+            else:
+                loss = criterion1(output, target, index)
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
@@ -590,10 +613,13 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
         all_labels = []
         all_predictions = []
         with torch.no_grad():
-            for psd_data, pt_data, target in val_loader:
-                psd_data, pt_data, target = psd_data.to(device), pt_data.to(device), target.to(device).float() #.unsqueeze(1)
+            for psd_data, pt_data, target, index in val_loader:
+                psd_data, pt_data, target, index = psd_data.to(device), pt_data.to(device), target.to(device).float(), index.to(device) #.unsqueeze(1)
                 output = model(psd_data, pt_data)
-                loss = criterion(output, target)
+                if cpc:
+                    loss = criterion(output, target)
+                else:
+                    loss = criterion2(output, target, index)
                 val_loss += loss.item()
                 all_labels.append(target.cpu().numpy())
 
