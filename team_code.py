@@ -30,7 +30,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if verbose >= 1:
         print('Finding the Challenge data...')
 
-    patient_ids = find_data_folders(data_folder) #************
+    patient_ids = find_data_folders(data_folder) #[100:110] #************
     #patient_ids2 = find_data_folders(data_folder)[70:100]
     #patient_ids = np.concatenate([patient_ids, patient_ids2])
     num_patients = len(patient_ids)
@@ -53,7 +53,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     for i in range(num_patients):
         if verbose >= 2:
             print('    {}/{}...'.format(i+1, num_patients))
-        print(f'paient id : {patient_ids[i]}')
+        print(f'patient id : {patient_ids[i]}')
         patient_features, eeg_features= get_features(data_folder, patient_ids[i])
         #features.append(current_features)
         pt_list.append(patient_features)
@@ -252,6 +252,13 @@ def get_features(data_folder, patient_id):
 
     if num_recordings > 0:
         recording_id = recording_ids[-1] ##recording_ids = ['0284_001_004', '0284_002_005', ... '0284_085_074']
+#################################################################### ONLY HERE ##############################################################
+        for reid in recording_ids:
+            if reid.endswith('_072'):
+                recording_id = reid
+                print(f'get a 72 hr file in pid : {patient_id}')
+                break
+#################################################################### ONLY HERE ##############################################################
         recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
         if os.path.exists(recording_location + '.hea'):
             data, channels, sampling_frequency = load_recording_data(recording_location)
@@ -366,9 +373,34 @@ def get_eeg_features(data, sampling_frequency):
         psds.append(psd)
         #freqs.append(freq)
         #biss.append(bis[j:j+NFFT])
+    #print(len(psds))
+    #print(psds[0].shape, sampling_frequency)
+    #if len(psds) >=27:
     
-    psds = [p for p in psds if p.shape == (2,1921)]    
-    
+    psds = [p for p in psds if p.shape == (2,1921)]
+
+    if len(psds) < 10:
+        for j in range(len(data)//2, len(data)//2 + SEGLEN-NFFT, SLIDE):
+            if len(data[EEG1, j:j+NFFT]) < NFFT/2:
+                continue
+            if len(data[EEG2, j:j+NFFT]) < NFFT/2:
+                continue
+
+            nall = len(consecutive(data[EEG1, j:j+NFFT], stepsize=0, threshold=sampling_frequency*10))
+            nall2 = len(consecutive(data[EEG2, j:j+NFFT], stepsize=0, threshold=sampling_frequency*10))
+            if nall > 1 or nall2 > 1:
+                continue
+            
+            
+            psd, freq = psd_array_multitaper(data[EEG1, j:j+NFFT], sampling_frequency, adaptive=True, normalization='full', verbose=50)
+            psd2, freq2 = psd_array_multitaper(data[EEG2, j:j+NFFT], sampling_frequency, adaptive=True, normalization='full', verbose=50)  
+            psd = np.vstack([psd, psd2])
+            psds.append(psd)
+        print('Additional psd analysis')
+
+    psds = [p for p in psds if p.shape == (2,1921)]
+
+    print(f'# of psds : {len(psds)}')
     if len(psds) > 1:
         psds = 10 * np.log10(psds)
 
@@ -380,12 +412,14 @@ def get_eeg_features(data, sampling_frequency):
             # get median of psds
             psd_m = np.median(psds, axis=0)
             psd_m = psd_m[:, index_1hz:index_40hz]
+    #else:
+    #    psd_m = psds[:, index_1hz:index_40hz]
 
     else:
         psd_m = float('nan') * np.ones((2, 1280))
 
     return psd_m
-    
+
 # Extract features from the ECG data.
 def get_ecg_features(data):
     num_channels, num_samples = np.shape(data)
@@ -408,7 +442,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from acnn1d import ACNN
+#from acnn1d import ACNN
+from crnn1d import CRNN
 import sklearn
 from sklearn.model_selection import train_test_split
 # Define custom dataset
@@ -437,7 +472,7 @@ class TestDataset(Dataset):
     def __getitem__(self, index):
         return self.eeg_data[index], self.meta_data[index]
 
-
+'''
 # Your pre-trained EEG Model, but without the last layer
 class Modified1DCNN(nn.Module):
     def __init__(self, original_model):
@@ -448,7 +483,7 @@ class Modified1DCNN(nn.Module):
     def forward(self, x):
         x = self.features(x)
         return x
-
+'''
 # Multi-modal Model
 class MultiModalModel(nn.Module):
     def __init__(self, eeg_model, meta_input_dim):
@@ -518,9 +553,10 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
         criterion = nn.MSELoss()
         #scoring = False
 
-    base_model = ACNN(in_channels, out_channels, att_channels, n_len_seg, n_classes, device, last_layer=False)
+    #base_model = ACNN(in_channels, out_channels, att_channels, n_len_seg, n_classes, device, last_layer=False)
+    base_model = CRNN(in_channels, out_channels, n_len_seg, n_classes, device, verbose=False, last_layer=False)
     if pretrained:
-        base_model.load_state_dict(torch.load("./pretrain_model.pth"))
+        base_model.load_state_dict(torch.load("./pretrained_model.pth"))
 
     ## Create the modified model
     #modified_eeg_model = Modified1DCNN(original_eeg_model)
@@ -532,7 +568,7 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
 
     model = model.to(device)
     # Early stopping parameters
-    patience = 10  # Number of epochs with no improvement to wait
+    patience = 20  # Number of epochs with no improvement to wait
     best_val_loss = float('inf')
     best_score = float('-inf')
     counter = 0
@@ -634,7 +670,8 @@ def test_model(pt_list, psd_list, modelpath=None, cpc=False):
     n_len_seg = 128 # Segment length for RNN, adjust based on your needs
 
 
-    base_model = ACNN(in_channels, out_channels, att_channels, n_len_seg, n_classes, device, last_layer=False)
+    #base_model = ACNN(in_channels, out_channels, att_channels, n_len_seg, n_classes, device, last_layer=False)
+    base_model = CRNN(in_channels, out_channels, n_len_seg, n_classes, device, verbose=False, last_layer=False)
     base_model.last_layer = False
     meta_input_dim = pt_list.shape[1]
     model = MultiModalModel(base_model, meta_input_dim)
