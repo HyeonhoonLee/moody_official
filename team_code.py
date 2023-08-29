@@ -368,18 +368,21 @@ def get_eeg_features(data, sampling_frequency):
         #biss.append(bis[j:j+NFFT])
     
     psds = [p for p in psds if p.shape == (2,1921)]    
-    psds = 10 * np.log10(psds)
-
-    # Truncate the frequency range from 1 Hz to 40 Hz
-    index_1hz = int(round(1 / (sampling_frequency / NFFT)))
-    index_40hz = int(round(40 / (sampling_frequency / NFFT))) + 110 # Add 110 to make 1280 points
     
     if len(psds) > 1:
-        # get median of psds
-        psd_m = np.median(psds, axis=0)
-        psd_m = psd_m[:, index_1hz:index_40hz]
+        psds = 10 * np.log10(psds)
+
+        # Truncate the frequency range from 1 Hz to 40 Hz
+        index_1hz = int(round(1 / (sampling_frequency / NFFT)))
+        index_40hz = int(round(40 / (sampling_frequency / NFFT))) + 110 # Add 110 to make 1280 points
+        
+        if len(psds) > 1:
+            # get median of psds
+            psd_m = np.median(psds, axis=0)
+            psd_m = psd_m[:, index_1hz:index_40hz]
+
     else:
-        psd_m = psds[index_1hz:index_40hz]
+        psd_m = float('nan') * np.ones((2, 1280))
 
     return psd_m
     
