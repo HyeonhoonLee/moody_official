@@ -366,21 +366,23 @@ def get_eeg_features(data, sampling_frequency):
         psds.append(psd)
         #freqs.append(freq)
         #biss.append(bis[j:j+NFFT])
-    print(len(psds))
-    if len(psds) >=27:
-        
-        psds = 10 * np.log10(psds)
+    
+    psds = [p for p in psds if p.shape == (2,1921)]    
+    psds = 10 * np.log10(psds)
+
+    # Truncate the frequency range from 1 Hz to 40 Hz
+    index_1hz = int(round(1 / (sampling_frequency / NFFT)))
+    index_40hz = int(round(40 / (sampling_frequency / NFFT))) + 110 # Add 110 to make 1280 points
+    
+    if len(psds) > 1:
         # get median of psds
         psd_m = np.median(psds, axis=0)
-        
-        # Truncate the frequency range from 1 Hz to 40 Hz
-        index_1hz = int(round(1 / (sampling_frequency / NFFT)))
-        index_40hz = int(round(40 / (sampling_frequency / NFFT))) + 110 # Add 110 to make 1280 points
         psd_m = psd_m[:, index_1hz:index_40hz]
-
-        return psd_m
     else:
-        return float('nan') * np.ones((2, 1280))
+        psd_m = psds[index_1hz:index_40hz]
+
+    return psd_m
+    
 # Extract features from the ECG data.
 def get_ecg_features(data):
     num_channels, num_samples = np.shape(data)
