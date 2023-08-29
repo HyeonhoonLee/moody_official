@@ -401,12 +401,9 @@ def get_eeg_features(data, sampling_frequency):
         index_1hz = int(round(1 / (sampling_frequency / NFFT)))
         index_40hz = int(round(40 / (sampling_frequency / NFFT))) + 110 # Add 110 to make 1280 points
         
-        if len(psds) > 1:
-            # get median of psds
-            psd_m = np.median(psds, axis=0)
-            psd_m = psd_m[:, index_1hz:index_40hz]
-    #else:
-    #    psd_m = psds[:, index_1hz:index_40hz]
+        # get median of psds
+        psd_m = np.median(psds, axis=0)
+        psd_m = psd_m[:, index_1hz:index_40hz]
 
     else:
         psd_m = float('nan') * np.ones((2, 1280))
