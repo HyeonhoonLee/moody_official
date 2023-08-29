@@ -146,7 +146,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     #features = features.reshape(1, -1)
 
     # Impute missing data.
-    patient_features = imputer.transform([patient_features])
+    patient_features = imputer.transform(patient_features.reshape(1,-1))
     patient_features = pt_scaler.transform(patient_features)
 
     eeg_features = (eeg_features - mean_psds) / std_psds
