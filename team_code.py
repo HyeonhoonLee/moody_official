@@ -455,13 +455,13 @@ class MultiModalModel(nn.Module):
         super(MultiModalModel, self).__init__()
         self.eeg_model = eeg_model
         self.meta_model = nn.Sequential(
-            nn.Linear(meta_input_dim, 128),
+            nn.Linear(meta_input_dim, 32),
             nn.ReLU(),
-            nn.Linear(128, 64),
+            nn.Linear(32, 16),
             nn.ReLU()
         )
         #self.classifier = nn.Linear(64 + eeg_model.output_dim, 1)
-        self.classifier = nn.Linear(64 + 64, 1)
+        self.classifier = nn.Linear(16 + 64, 1)
     
     def forward(self, eeg_data, meta_data):
         x1 = self.eeg_model(eeg_data)
