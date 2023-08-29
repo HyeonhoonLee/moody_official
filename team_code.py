@@ -17,7 +17,10 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 import joblib
 from mne.time_frequency import psd_array_multitaper
 from sklearn.preprocessing import StandardScaler
-
+import libauc
+from libauc.losses import pAUC_CVaR_Loss, pAUC_DRO_Loss, tpAUC_KL_Loss
+from libauc.sampler import DualSampler
+from libauc.optimizers import SOPA
 ################################################################################
 #
 # Required functions. Edit these functions to add your code, but do not change the arguments of the functions.
@@ -30,7 +33,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if verbose >= 1:
         print('Finding the Challenge data...')
 
-    patient_ids = find_data_folders(data_folder) #************
+    patient_ids = find_data_folders(data_folder) #[342:]#[100:150] #************
     #patient_ids2 = find_data_folders(data_folder)[70:100]
     #patient_ids = np.concatenate([patient_ids, patient_ids2])
     num_patients = len(patient_ids)
@@ -45,41 +48,41 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if verbose >= 1:
         print('Extracting features and labels from the Challenge data...')
 
-    pt_list = list()
-    psd_list = list()
-    outcomes = list()
-    cpcs = list()
+        pt_list = list()
+        psd_list = list()
+        outcomes = list()
+        cpcs = list()
 
-    for i in range(num_patients):
-        if verbose >= 2:
-            print('    {}/{}...'.format(i+1, num_patients))
-        print(f'patient id : {patient_ids[i]}')
-        patient_features, eeg_features= get_features(data_folder, patient_ids[i])
-        #features.append(current_features)
-        pt_list.append(patient_features)
-        psd_list.append(eeg_features)
+        for i in range(num_patients):
+            if verbose >= 2:
+                print('    {}/{}...'.format(i+1, num_patients))
+            print(f'patient id : {patient_ids[i]}')
+            patient_features, eeg_features= get_features(data_folder, patient_ids[i])
+            #features.append(current_features)
+            pt_list.append(patient_features)
+            psd_list.append(eeg_features)
 
-        # Extract labels.
-        patient_metadata = load_challenge_data(data_folder, patient_ids[i])
-        current_outcome = get_outcome(patient_metadata)
-        outcomes.append(current_outcome)
-        current_cpc = get_cpc(patient_metadata)
-        cpcs.append(current_cpc)
+            # Extract labels.
+            patient_metadata = load_challenge_data(data_folder, patient_ids[i])
+            current_outcome = get_outcome(patient_metadata)
+            outcomes.append(current_outcome)
+            current_cpc = get_cpc(patient_metadata)
+            cpcs.append(current_cpc)
 
-    #features = np.vstack(features)
-    pt_list = np.vstack(pt_list)
-    psd_list = np.stack(psd_list, axis=0)
-    outcomes = np.vstack(outcomes)
-    cpcs = np.vstack(cpcs)
+        #features = np.vstack(features)
+        pt_list = np.vstack(pt_list)
+        psd_list = np.stack(psd_list, axis=0)
+        outcomes = np.vstack(outcomes)
+        cpcs = np.vstack(cpcs)
 
-    # Remove missing values
-    valid_mask = ~(np.max(np.isnan(psd_list), axis=2) > 0) # nan이 있으면 제거
-    valid_mask = valid_mask[:,0] & valid_mask[:,1]
+        # Remove missing values
+        valid_mask = ~(np.max(np.isnan(psd_list), axis=2) > 0) # nan이 있으면 제거
+        valid_mask = valid_mask[:,0] & valid_mask[:,1]
 
-    pt_list = pt_list[valid_mask]
-    psd_list = psd_list[valid_mask]
-    outcomes = outcomes[valid_mask]
-    cpcs = cpcs[valid_mask]    
+        pt_list = pt_list[valid_mask]
+        psd_list = psd_list[valid_mask]
+        outcomes = outcomes[valid_mask]
+        cpcs = cpcs[valid_mask]    
 
     # Impute any missing features; use the mean value by default.
     #imputer = SimpleImputer().fit(features)
@@ -105,7 +108,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     train_model(pt_list, psd_list, outcomes, model_folder, pretrained=True, cpc=False)
 
     #2 CPC model
-    train_model(pt_list, psd_list, cpcs, model_folder, pretrained=True, cpc=True)
+    #train_model(pt_list, psd_list, cpcs, model_folder, pretrained=True, cpc=True)
 
     
     # Assume eeg_data.shape = (n_samples, n_channels, n_timepoints)
@@ -206,7 +209,7 @@ def preprocess_data(data, sampling_frequency, utility_frequency):
     #print('removed')
 
     '''
-    # If the utility frequency is between bandpass frequencies, then apply a notch filter.
+    # If the utility frequency is between bandpass frequencies, then apply  a notch filter.
     if utility_frequency is not None and passband[0] <= utility_frequency <= passband[1]:
         data = mne.filter.notch_filter(data, sampling_frequency, utility_frequency, n_jobs=4, verbose='error')
 
@@ -269,27 +272,6 @@ def get_features(data_folder, patient_id):
     else:
         eeg_features = float('nan') * np.ones((2, 1280)) # 2 bipolar channels * 4 features / channel
 
-    '''
-    # Extract ECG features.
-    ecg_channels = ['ECG', 'ECGL', 'ECGR', 'ECG1', 'ECG2']
-    group = 'ECG'
-
-    if num_recordings > 0:
-        recording_id = recording_ids[0]
-        recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
-        if os.path.exists(recording_location + '.hea'):
-            data, channels, sampling_frequency = load_recording_data(recording_location)
-            utility_frequency = get_utility_frequency(recording_location + '.hea')
-
-            data, channels = reduce_channels(data, channels, ecg_channels)
-            data, sampling_frequency = preprocess_data(data, sampling_frequency, utility_frequency)
-            features = get_ecg_features(data)
-            ecg_features = expand_channels(features, channels, ecg_channels).flatten()
-        else:
-            ecg_features = float('nan') * np.ones(10) # 5 channels * 2 features / channel
-    else:
-        ecg_features = float('nan') * np.ones(10) # 5 channels * 2 features / channel
-    '''
     # Extract features.
     #return np.hstack((patient_features, eeg_features, ecg_features))
     return patient_features, eeg_features # (8,1280)
@@ -364,15 +346,10 @@ def get_eeg_features(data, sampling_frequency):
         psd2, freq2 = psd_array_multitaper(data[EEG2, j:j+NFFT], sampling_frequency, adaptive=True, normalization='full', verbose=50)  
         psd = np.vstack([psd, psd2])
         psds.append(psd)
-        #freqs.append(freq)
-        #biss.append(bis[j:j+NFFT])
-    #print(len(psds))
-    #print(psds[0].shape, sampling_frequency)
-    #if len(psds) >=27:
     
     psds = [p for p in psds if p.shape == (2,1921)]
 
-        if len(psds) < 10:
+    if len(psds) < 10:
         for j in range(len(data)//4, len(data)//4 + SEGLEN-NFFT, SLIDE):
             if len(data[EEG1, j:j+NFFT]) < NFFT/2:
                 continue
@@ -473,7 +450,7 @@ def get_ecg_features(data):
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Sampler
 #from acnn1d import ACNN
 from crnn1d import CRNN
 import sklearn
@@ -490,7 +467,6 @@ class MultiModalDataset(Dataset):
     
     def __getitem__(self, index):
         return self.eeg_data[index], self.meta_data[index], self.labels[index], index
-
 
 # Define custom dataset
 class TestDataset(Dataset):
@@ -568,9 +544,17 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
 
     train_dataset = MultiModalDataset(psd_train, pt_train, y_train)
     val_dataset = MultiModalDataset(psd_val, pt_val, y_val)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
     
+    BATCH_SIZE = 32
+    if cpc:
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    else:
+        train_sampler = DualSampler(train_dataset, labels=y_train, batch_size=BATCH_SIZE, sampling_rate=0.4, shuffle=True, random_seed=42)
+        #val_sampler = DualSampler(val_dataset, labels=y_val, batch_size=BATCH_SIZE, sampling_rate=0.5, shuffle=False, random_seed=42)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=train_sampler, shuffle=False)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
 
     # Initialize CRNN model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -582,11 +566,13 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
     att_channels=16
     n_len_seg = 128 # Segment length for RNN, adjust based on your needs
 
-    import libauc
-    from libauc.losses import pAUC_CVaR_Loss
 
-    criterion1 = pAUC_CVaR_Loss(data_len=train_data_len, pos_len=train_pos_len, beta=0.05, eta=0.1)
-    criterion2 = pAUC_CVaR_Loss(data_len=val_data_len, pos_len=val_pos_len, beta=0.05, eta=0.1)
+    criterion1 = pAUC_CVaR_Loss(data_len=train_data_len, pos_len=train_pos_len, margin=1.0, beta=0.05, eta=0.1)
+    criterion2 = pAUC_CVaR_Loss(data_len=val_data_len, pos_len=val_pos_len, margin=1.0, beta=0.05, eta=0.1)
+    #criterion1 = pAUC_DRO_Loss(data_len=train_data_len, gamma=0.9, Lambda=1.0)
+    #criterion2 = pAUC_DRO_Loss(data_len=val_data_len, gamma=0.9, Lambda=1.0)
+    #criterion1 = tpAUC_KL_Loss(data_len=train_data_len)
+    #criterion2 = tpAUC_KL_Loss(data_len=val_data_len)
     #classpAUC_CVaR_Loss(data_len, pos_len, num_neg=None, margin=1.0, beta=0.2, eta=1.0, surr_loss='squared_hinge', device=None)
 
     # Criterion and optimizer
@@ -609,11 +595,12 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
 
     meta_input_dim = pt_list.shape[1]
     model = MultiModalModel(base_model, meta_input_dim)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    #optimizer = optim.Adam(model.parameters(), lr=0.01) #####################################
+    optimizer = SOPA(model.parameters(), lr=0.003, mode='adam')
 
     model = model.to(device)
     # Early stopping parameters
-    patience = 20  # Number of epochs with no improvement to wait
+    patience = 30  # Number of epochs with no improvement to wait
     best_val_loss = float('inf')
     best_score = float('-inf')
     counter = 0
@@ -671,9 +658,11 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
             # Check for early stopping
             if val_score > best_score:
                 best_score = val_score
+            #if val_loss < best_val_loss:
+            #    best_val_loss = val_loss
                 counter = 0
                 torch.save(model.state_dict(), os.path.join(model_folder, 'best_model_outcome.pth'))
-                print("Saved best model")
+                print("####################################Saved best model####################################")
             else:
                 counter += 1
                 if counter >= patience:
@@ -688,7 +677,7 @@ def train_model(pt_list, psd_list, label, model_folder=None, pretrained=False, c
                 best_val_loss = val_loss
                 counter = 0
                 torch.save(model.state_dict(), os.path.join(model_folder, 'best_model_cpc.pth'))
-                print("Saved best model")
+                print("####################################Saved best model####################################")
             else:
                 counter += 1
                 if counter >= patience:
