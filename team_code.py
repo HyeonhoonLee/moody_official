@@ -252,13 +252,6 @@ def get_features(data_folder, patient_id):
 
     if num_recordings > 0:
         recording_id = recording_ids[-1] ##recording_ids = ['0284_001_004', '0284_002_005', ... '0284_085_074']
-#################################################################### ONLY HERE ##############################################################
-        for reid in recording_ids:
-            if reid.endswith('_072'):
-                recording_id = reid
-                print(f'get a 72 hr file in pid : {patient_id}')
-                break
-#################################################################### ONLY HERE ##############################################################
         recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
         if os.path.exists(recording_location + '.hea'):
             data, channels, sampling_frequency = load_recording_data(recording_location)
