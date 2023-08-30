@@ -350,7 +350,7 @@ def get_eeg_features(data, sampling_frequency):
     psds = [p for p in psds if p.shape == (2,1921)]
 
     if len(psds) < 10:
-        for j in range(len(data)//4, len(data)//4 + SEGLEN-NFFT, SLIDE):
+        for j in range(num_samples//4, num_samples//4 + SEGLEN-NFFT, SLIDE):
             if len(data[EEG1, j:j+NFFT]) < NFFT/2:
                 continue
             if len(data[EEG2, j:j+NFFT]) < NFFT/2:
@@ -371,7 +371,7 @@ def get_eeg_features(data, sampling_frequency):
     psds = [p for p in psds if p.shape == (2,1921)]
 
     if len(psds) < 10:
-        for j in range(len(data)//2, len(data)//2 + SEGLEN-NFFT, SLIDE):
+        for j in range(num_samples//2, num_samples//2 + SEGLEN-NFFT, SLIDE):
             if len(data[EEG1, j:j+NFFT]) < NFFT/2:
                 continue
             if len(data[EEG2, j:j+NFFT]) < NFFT/2:
@@ -392,7 +392,7 @@ def get_eeg_features(data, sampling_frequency):
     psds = [p for p in psds if p.shape == (2,1921)]
 
     if len(psds) < 10:
-        for j in range(3*len(data)//4, 3*len(data)//4 + SEGLEN-NFFT, SLIDE):
+        for j in range(3*num_samples//4, 3*num_samples//4 + SEGLEN-NFFT, SLIDE):
             if len(data[EEG1, j:j+NFFT]) < NFFT/2:
                 continue
             if len(data[EEG2, j:j+NFFT]) < NFFT/2:
