@@ -499,12 +499,15 @@ class MultiModalModel(nn.Module):
         self.eeg_model = eeg_model
         self.meta_model = nn.Sequential(
             nn.Linear(meta_input_dim, 32),
+            nn.Dropout(0.25),
             nn.ReLU(),
             nn.Linear(32, 16),
+            nn.Dropout(0.25),
             nn.ReLU()
         )
         #self.classifier = nn.Linear(64 + eeg_model.output_dim, 1)
-        self.classifier = nn.Linear(16 + 64, 1)
+        self.dense = nn.Linear(16+64, 16)
+        self.classifier = nn.Linear(16, 1)
     
     def forward(self, eeg_data, meta_data):
         x1 = self.eeg_model(eeg_data)
@@ -512,6 +515,7 @@ class MultiModalModel(nn.Module):
         #print(x1.shape, x2.shape)
 
         x = torch.cat((x1, x2), dim=1)
+        x = self.dense(x)
         x = self.classifier(x)
         return x
 
